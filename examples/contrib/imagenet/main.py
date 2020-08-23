@@ -4,6 +4,7 @@ from datetime import datetime
 import fire
 
 import torch
+import torchvision
 import torch.nn as nn
 import torch.optim as optim
 
@@ -26,7 +27,7 @@ def training(local_rank, config):
     manual_seed(config["seed"] + rank)
     device = idist.device()
 
-    logger = setup_logger(name="CIFAR10-Training", distributed_rank=local_rank)
+    logger = setup_logger(name="ImageNet-Training", distributed_rank=local_rank)
 
     log_basic_info(logger, config)
 
@@ -47,31 +48,14 @@ def training(local_rank, config):
         if "cuda" in device.type:
             config["cuda device name"] = torch.cuda.get_device_name(local_rank)
 
-        if config["with_trains"]:
-            from trains import Task
-
-            task = Task.init("CIFAR10-Training", task_name=output_path.stem)
-            task.connect_configuration(config)
-            # Log hyper parameters
-            hyper_params = [
-                "model",
-                "batch_size",
-                "momentum",
-                "weight_decay",
-                "num_epochs",
-                "learning_rate",
-                "num_warmup_epochs",
-            ]
-            task.connect({k: config[k] for k in hyper_params})
-
     # Setup dataflow, model, optimizer, criterion
-    train_loader, test_loader = get_dataflow(config)
+    train_loader, test_loader = get_imagenet_dataloader(config)
 
     config["num_iters_per_epoch"] = len(train_loader)
     model, optimizer, criterion, lr_scheduler = initialize(config)
 
     # Create trainer for current task
-    trainer = create_trainer(model, optimizer, criterion, lr_scheduler, train_loader.sampler, config, logger)
+    trainer = create_supervised_trainer(model, optimizer, criterion, lr_scheduler, train_loader.sampler, config, logger)
 
     # Let's now setup evaluator engine to perform model's validation and compute metrics
     metrics = {
@@ -133,24 +117,28 @@ def training(local_rank, config):
 
 def run(
     seed=543,
-    data_path="/tmp/cifar10",
-    output_path="/tmp/output-cifar10/",
+    data_path="/data/ImageNet/ImageNet-pytorch/",
+    output_path="/data/ImageNet/ImageNet-pytorch/output/",
     model="resnet18",
     batch_size=512,
     momentum=0.9,
     weight_decay=1e-4,
-    num_workers=12,
-    num_epochs=24,
-    learning_rate=0.4,
+    num_workers=16,
+    num_epochs=100,
+    learning_rate=0.1,
     num_warmup_epochs=4,
     validate_every=3,
     checkpoint_every=200,
-    backend=None,
+    backend="nccl",
     resume_from=None,
     log_every_iters=15,
     nproc_per_node=None,
     stop_iteration=None,
     with_trains=False,
+    cache_dataset=True,
+    num_classes=1000,
+    lr_step_size=30,
+    lr_gamma=0.1,
     **spawn_kwargs
 ):
     """Main entry to train an model on CIFAR10 dataset.
@@ -213,17 +201,102 @@ def get_dataflow(config):
 
     # Setup data loader also adapted to distributed config: nccl, gloo, xla-tpu
     train_loader = idist.auto_dataloader(
-        train_dataset, batch_size=config["batch_size"], num_workers=config["num_workers"], shuffle=True, drop_last=True,
+        train_dataset, batch_size=config["batch_size"],
+        num_workers=config["num_workers"], shuffle=True, 
+        drop_last=True,
     )
 
     test_loader = idist.auto_dataloader(
-        test_dataset, batch_size=2 * config["batch_size"], num_workers=config["num_workers"], shuffle=False,
+        test_dataset, batch_size=2 * config["batch_size"], 
+        num_workers=config["num_workers"], shuffle=False,
     )
     return train_loader, test_loader
 
 
+def _get_cache_path(filepath):
+    import hashlib
+    h = hashlib.sha1(filepath.encode()).hexdigest()
+    cache_path = os.path.join("~", ".torch", "vision", "datasets", "imagefolder", h[:10] + ".pt")
+    cache_path = os.path.expanduser(cache_path)
+    return cache_path
+
+
+def load_data(traindir, valdir, cache_dataset):
+    # Data loading code
+    print("Loading data")
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+
+    print("Loading training data")
+    st = time.time()
+    cache_path = _get_cache_path(traindir)
+    if cache_dataset and os.path.exists(cache_path):
+        # Attention, as the transforms are also cached!
+        print("Loading dataset_train from {}".format(cache_path))
+        train_dataset, _ = torch.load(cache_path)
+    else:
+        train_dataset = torchvision.datasets.ImageFolder(
+            traindir,
+            transforms.Compose([
+                transforms.RandomResizedCrop(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ]))
+        if cache_dataset:
+            print("Saving train_dataset to {}".format(cache_path))
+            utils.mkdir(os.path.dirname(cache_path))
+            utils.save_on_master((train_dataset, traindir), cache_path)
+    print("Took", time.time() - st)
+
+    print("Loading validation data")
+    cache_path = _get_cache_path(valdir)
+    if cache_dataset and os.path.exists(cache_path):
+        # Attention, as the transforms are also cached!
+        print("Loading test_dataset from {}".format(cache_path))
+        test_dataset, _ = torch.load(cache_path)
+    else:
+        test_dataset = torchvision.datasets.ImageFolder(
+            valdir,
+            transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                normalize,
+            ]))
+        if cache_dataset:
+            print("Saving test_dataset to {}".format(cache_path))
+            utils.mkdir(os.path.dirname(cache_path))
+            utils.save_on_master((test_dataset, valdir), cache_path)
+    '''
+    print("Creating data loaders")
+    if distributed:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test)
+    else:
+        train_sampler = torch.utils.data.RandomSampler(dataset)
+        test_sampler = torch.utils.data.SequentialSampler(dataset_test)
+    '''
+
+    return train_dataset, test_dataset
+
+
+def get_imagenet_dataloader(config):
+    train_dir = os.path.join(config["data_path"], 'train')
+    val_dir = os.path.join(config["data_path"], 'val')
+    train_dataset, test_dataset = load_data(train_dir, val_dir,
+                            config["cache_dataset"])
+    train_loader = idist.auto_dataloader(
+        train_dataset, batch_size=config["batch_size"],
+        num_workers=config["num_workers"], pin_memory=True)
+
+    test_loader = idist.auto_dataloader(
+        test_dataset, batch_size=config["batch_size"],
+        num_workers=config["num_workers"], pin_memory=True)
+
+
 def initialize(config):
-    model = utils.get_model(config["model"])
+    model = utils.get_model(config["model"], config["num_classes"])
     # Adapt model for distributed settings if configured
     model = idist.auto_model(model)
 
@@ -237,6 +310,7 @@ def initialize(config):
     optimizer = idist.auto_optim(optimizer)
     criterion = nn.CrossEntropyLoss().to(idist.device())
 
+    '''
     le = config["num_iters_per_epoch"]
     milestones_values = [
         (0, 0.0),
@@ -244,6 +318,8 @@ def initialize(config):
         (le * config["num_epochs"], 0.0),
     ]
     lr_scheduler = PiecewiseLinear(optimizer, param_name="lr", milestones_values=milestones_values)
+    '''
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config["lr_step_size"], gamma=config["lr_gamma"])
 
     return model, optimizer, criterion, lr_scheduler
 
@@ -274,7 +350,82 @@ def log_basic_info(logger, config):
         logger.info("\n")
 
 
-def create_trainer(model, optimizer, criterion, lr_scheduler, train_sampler, config, logger):
+def create_supervised_trainer(model, 
+                              optimizer, 
+                              criterion, 
+                              lr_scheduler, 
+                              train_sampler, 
+                              config, 
+                              logger):
+    device = idist.device()
+
+    def _update(engine, batch):
+        model.train()
+        (paths, imgs, targets) = batch
+        imgs = imgs.to(device)
+        targets = [target.to(device) for target in targets
+                   ]  #if torch.cuda.device_count() >= 1 else targets
+
+        _metrics, total_loss = model(imgs, targets)
+
+        dist_metrics = [reduce_metric_dict(me) for me in _metrics]
+        # Compute gradient
+        optimizer.zero_grad()
+        loss = sum(total_loss)
+        loss.backward()
+        optimizer.step()
+
+        # This can be helpful for XLA to avoid performance slow down if fetch loss.item() every iteration
+        if config["log_every_iters"] > 0 and (engine.state.iteration - 1) % config["log_every_iters"] == 0:
+            batch_loss = loss.item()
+            engine.state.saved_batch_loss = batch_loss
+        else:
+            batch_loss = engine.state.saved_batch_loss
+
+        return {
+            "batch loss": batch_loss,
+        }
+
+    trainer = Engine(train_step)
+    trainer.state.saved_batch_loss = -1.0
+    trainer.state_dict_user_keys.append("saved_batch_loss")
+    trainer.logger = logger
+
+    to_save = {"trainer": trainer, "model": model, "optimizer": optimizer, "lr_scheduler": lr_scheduler}
+    metric_names = [
+        "batch loss",
+    ]
+
+    common.setup_common_training_handlers(
+        trainer=trainer,
+#        train_sampler=train_sampler,
+        to_save=to_save,
+        save_every_iters=config["checkpoint_every"],
+        save_handler=get_save_handler(config),
+        lr_scheduler=lr_scheduler,
+        output_names=metric_names if config["log_every_iters"] > 0 else None,
+        with_pbars=False,
+        clear_cuda_cache=False,
+    )
+
+    resume_from = config["resume_from"]
+    if resume_from is not None:
+        checkpoint_fp = Path(resume_from)
+        assert checkpoint_fp.exists(), "Checkpoint '{}' is not found".format(checkpoint_fp.as_posix())
+        logger.info("Resume from a checkpoint: {}".format(checkpoint_fp.as_posix()))
+        checkpoint = torch.load(checkpoint_fp.as_posix(), map_location="cpu")
+        Checkpoint.load_objects(to_load=to_save, checkpoint=checkpoint)
+
+    return trainer
+
+
+def create_trainer(model, 
+                   optimizer, 
+                   criterion, 
+                   lr_scheduler, 
+                   train_sampler, 
+                   config, 
+                   logger):
 
     device = idist.device()
 

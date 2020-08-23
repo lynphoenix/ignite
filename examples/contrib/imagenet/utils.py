@@ -30,10 +30,10 @@ def get_train_test_datasets(path):
     return train_ds, test_ds
 
 
-def get_model(name):
+def get_model(name,num_classes):
     if name in models.__dict__:
         fn = models.__dict__[name]
     else:
         raise RuntimeError("Unknown model name {}".format(name))
 
-    return fn(num_classes=10)
+    return fn(num_classes=num_classes)
