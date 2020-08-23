@@ -365,7 +365,7 @@ def create_supervised_trainer(model,
 
     def _update(engine, batch):
         model.train()
-        (paths, imgs, targets) = batch
+        (imgs, targets) = batch
         imgs = imgs.to(device)
         targets = [target.to(device) for target in targets
                    ]  #if torch.cuda.device_count() >= 1 else targets
@@ -402,7 +402,7 @@ def create_supervised_trainer(model,
 
     common.setup_common_training_handlers(
         trainer=trainer,
-#        train_sampler=train_sampler,
+        train_sampler=train_sampler,
         to_save=to_save,
         save_every_iters=config["checkpoint_every"],
         save_handler=get_save_handler(config),
