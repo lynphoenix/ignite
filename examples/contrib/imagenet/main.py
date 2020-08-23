@@ -1,10 +1,14 @@
 from pathlib import Path
 from datetime import datetime
+import os
 
 import fire
+import time
 
 import torch
 import torchvision
+from torchvision import transforms
+
 import torch.nn as nn
 import torch.optim as optim
 
@@ -171,20 +175,15 @@ def run(
     """
     # catch all local parameters
     config = locals()
-    print(config)
-    print(config["spawn_kwargs"])
     config.update(config["spawn_kwargs"])
     del config["spawn_kwargs"]
-    print(config)
 
     spawn_kwargs["nproc_per_node"] = nproc_per_node
     print(config)
-    """
 
     with idist.Parallel(backend=backend, **spawn_kwargs) as parallel:
 
         parallel.run(training, config)
-    """
 
 
 def get_dataflow(config):
@@ -284,8 +283,11 @@ def load_data(traindir, valdir, cache_dataset):
 def get_imagenet_dataloader(config):
     train_dir = os.path.join(config["data_path"], 'train')
     val_dir = os.path.join(config["data_path"], 'val')
+    print(train_dir)
+    print(val_dir)
     train_dataset, test_dataset = load_data(train_dir, val_dir,
                             config["cache_dataset"])
+    print(len(train_dataset))
     train_loader = idist.auto_dataloader(
         train_dataset, batch_size=config["batch_size"],
         num_workers=config["num_workers"], pin_memory=True)
@@ -293,6 +295,8 @@ def get_imagenet_dataloader(config):
     test_loader = idist.auto_dataloader(
         test_dataset, batch_size=config["batch_size"],
         num_workers=config["num_workers"], pin_memory=True)
+
+    return train_loader, test_loader
 
 
 def initialize(config):
@@ -386,7 +390,7 @@ def create_supervised_trainer(model,
             "batch loss": batch_loss,
         }
 
-    trainer = Engine(train_step)
+    trainer = Engine(_update)
     trainer.state.saved_batch_loss = -1.0
     trainer.state_dict_user_keys.append("saved_batch_loss")
     trainer.logger = logger
