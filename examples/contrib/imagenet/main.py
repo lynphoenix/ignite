@@ -187,9 +187,11 @@ def run(
     print(config["spawn_kwargs"])
     config.update(config["spawn_kwargs"])
     del config["spawn_kwargs"]
-    """
+    print(config)
 
     spawn_kwargs["nproc_per_node"] = nproc_per_node
+    print(config)
+    """
 
     with idist.Parallel(backend=backend, **spawn_kwargs) as parallel:
 

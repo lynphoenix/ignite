@@ -38,3 +38,8 @@ coverage.xml
 # Documentation
 /docs/src/
 /docs/build/
+
+$ MAC 
+.DS_Store
+*/.DS_Store
+
