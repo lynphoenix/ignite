@@ -364,18 +364,27 @@ def create_supervised_trainer(model,
     device = idist.device()
 
     def _update(engine, batch):
+
+        x, y = batch[0], batch[1]
+
+        if x.device != device:
+            x = x.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True)
+
         model.train()
-        (imgs, targets) = batch
-        imgs = imgs.to(device)
-        targets = [target.to(device) for target in targets
-                   ]  #if torch.cuda.device_count() >= 1 else targets
+        # (imgs, targets) = batch
+        # imgs = imgs.to(device)
+        # targets = [target.to(device) for target in targets
+        #            ]  #if torch.cuda.device_count() >= 1 else targets
 
-        _metrics, total_loss = model(imgs, targets)
+        y_pred = model(x)
+        loss = criterion(y_pred, y)
 
-        dist_metrics = [reduce_metric_dict(me) for me in _metrics]
+        # dist_metrics = [reduce_metric_dict(me) for me in _metrics]
+
         # Compute gradient
         optimizer.zero_grad()
-        loss = sum(total_loss)
+        # loss = sum(total_loss)
         loss.backward()
         optimizer.step()
 
