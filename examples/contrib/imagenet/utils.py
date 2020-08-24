@@ -87,4 +87,4 @@ def get_model(name,num_classes):
     else:
         raise RuntimeError("Unknown model name {}".format(name))
 
-    return fn(num_classes=num_classes)
+    return fn()

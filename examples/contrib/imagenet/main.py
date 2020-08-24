@@ -292,16 +292,22 @@ def initialize(config):
     optimizer = idist.auto_optim(optimizer)
     criterion = nn.CrossEntropyLoss().to(idist.device())
 
-    '''
     le = config["num_iters_per_epoch"]
     milestones_values = [
-        (0, 0.0),
-        (le * config["num_warmup_epochs"], config["learning_rate"]),
-        (le * config["num_epochs"], 0.0),
+        (10, 0.1),
+        (20, 0.05),
+        (21, 0.01),
+        (30, 0.005),
+        (31, 0.001),
+        (60, 0.001),
+        (61, 0.0001),
+        (90, 0.0001),
+        # (le * config["num_warmup_epochs"], config["learning_rate"]),
+        # (le * config["num_epochs"], 0.0),
     ]
     lr_scheduler = PiecewiseLinear(optimizer, param_name="lr", milestones_values=milestones_values)
-    '''
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config["lr_step_size"], gamma=config["lr_gamma"])
+
+#    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config["lr_step_size"], gamma=config["lr_gamma"])
 
     return model, optimizer, criterion, lr_scheduler
 
