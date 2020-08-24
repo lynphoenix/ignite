@@ -227,46 +227,24 @@ def load_data(traindir, valdir, cache_dataset):
                                      std=[0.229, 0.224, 0.225])
 
     print("Loading training data")
-    st = time.time()
-    cache_path = _get_cache_path(traindir)
-    if cache_dataset and os.path.exists(cache_path):
-        # Attention, as the transforms are also cached!
-        print("Loading dataset_train from {}".format(cache_path))
-        train_dataset, _ = torch.load(cache_path)
-    else:
-        train_dataset = torchvision.datasets.ImageFolder(
-            traindir,
-            transforms.Compose([
-                transforms.RandomResizedCrop(224),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                normalize,
-            ]))
-        if cache_dataset:
-            print("Saving train_dataset to {}".format(cache_path))
-            utils.mkdir(os.path.dirname(cache_path))
-            utils.save_on_master((train_dataset, traindir), cache_path)
-    print("Took", time.time() - st)
+    train_dataset = torchvision.datasets.ImageFolder(
+        traindir,
+        transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize,
+        ]))
 
     print("Loading validation data")
-    cache_path = _get_cache_path(valdir)
-    if cache_dataset and os.path.exists(cache_path):
-        # Attention, as the transforms are also cached!
-        print("Loading test_dataset from {}".format(cache_path))
-        test_dataset, _ = torch.load(cache_path)
-    else:
-        test_dataset = torchvision.datasets.ImageFolder(
-            valdir,
-            transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-            ]))
-        if cache_dataset:
-            print("Saving test_dataset to {}".format(cache_path))
-            utils.mkdir(os.path.dirname(cache_path))
-            utils.save_on_master((test_dataset, valdir), cache_path)
+    test_dataset = torchvision.datasets.ImageFolder(
+        valdir,
+        transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            normalize,
+        ]))
     '''
     print("Creating data loaders")
     if distributed:
@@ -289,11 +267,11 @@ def get_imagenet_dataloader(config):
                             config["cache_dataset"])
     print(len(train_dataset))
     train_loader = idist.auto_dataloader(
-        train_dataset, batch_size=config["batch_size"],
+        train_dataset, batch_size=config["batch_size"],shuffle=True,
         num_workers=config["num_workers"], pin_memory=True)
 
     test_loader = idist.auto_dataloader(
-        test_dataset, batch_size=config["batch_size"],
+        test_dataset, batch_size=config["batch_size"],shuffle=False,
         num_workers=config["num_workers"], pin_memory=True)
 
     return train_loader, test_loader
