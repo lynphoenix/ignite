@@ -304,19 +304,19 @@ def initialize(config):
 
     le = config["num_iters_per_epoch"]
     cl = config["learning_rate"]
-
+    # print("%d, %f" %(le,cl))
     milestones_values = [
         (30*le, cl),
-        (50*le, 0.5*cl),
+        (45*le, 0.5*cl),
         (46*le, 0.1*cl),
         (60*le, 0.1*cl),
         (61*le, 0.01*cl),
         (90*le, 0.01*cl),
-        (100*le, 0.01*cl),
         (120*le, 0.001*cl),
         # (le * config["num_warmup_epochs"], config["learning_rate"]),
         # (le * config["num_epochs"], 0.0),
     ]
+    # print(milestones_values)
     lr_scheduler = PiecewiseLinear(optimizer, param_name="lr", milestones_values=milestones_values)
 
     # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config["lr_step_size"], gamma=config["lr_gamma"])
