@@ -365,11 +365,14 @@ def create_supervised_trainer(model,
 
     def _update(engine, batch):
 
-        x, y = batch[0], batch[1]
+        model.train()
 
-        if x.device != device:
-            x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
+        # x, y = batch[0], batch[1]
+        (imgs, target) = batch
+
+        if imgs.device != device:
+            imgs = imgs.to(device, non_blocking=True)
+            target = target.to(device, non_blocking=True)
 
         model.train()
         # (imgs, targets) = batch
@@ -377,8 +380,8 @@ def create_supervised_trainer(model,
         # targets = [target.to(device) for target in targets
         #            ]  #if torch.cuda.device_count() >= 1 else targets
 
-        y_pred = model(x)
-        loss = criterion(y_pred, y)
+        output = model(imgs)
+        loss = criterion(output, target)
 
         # dist_metrics = [reduce_metric_dict(me) for me in _metrics]
 
@@ -389,11 +392,17 @@ def create_supervised_trainer(model,
         optimizer.step()
 
         # This can be helpful for XLA to avoid performance slow down if fetch loss.item() every iteration
+        acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         if config["log_every_iters"] > 0 and (engine.state.iteration - 1) % config["log_every_iters"] == 0:
             batch_loss = loss.item()
             engine.state.saved_batch_loss = batch_loss
         else:
             batch_loss = engine.state.saved_batch_loss
+
+        if idist.get_rank() == 0:
+            print(acc1)
+            print(acc5)
+            print(batch_loss)
 
         return {
             "batch loss": batch_loss,
