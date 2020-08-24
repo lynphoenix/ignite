@@ -295,27 +295,31 @@ def initialize(config):
         lr=config["learning_rate"],
         momentum=config["momentum"],
         weight_decay=config["weight_decay"],
-        nesterov=True,
+#        nesterov=True,
     )
     optimizer = idist.auto_optim(optimizer)
-    criterion = nn.CrossEntropyLoss().to(idist.device())
+
+    # criterion = nn.CrossEntropyLoss().to(idist.device())
+    criterion = nn.CrossEntropyLoss()
 
     le = config["num_iters_per_epoch"]
+    cl = config["learning_rate"]
+
     milestones_values = [
-        (10, 0.1),
-        (20, 0.05),
-        (21, 0.01),
-        (30, 0.005),
-        (31, 0.001),
-        (60, 0.001),
-        (61, 0.0001),
-        (90, 0.0001),
+        (30*le, cl),
+        (50*le, 0.5*cl),
+        (46*le, 0.1*cl),
+        (60*le, 0.1*cl),
+        (61*le, 0.01*cl),
+        (90*le, 0.01*cl),
+        (100*le, 0.01*cl),
+        (120*le, 0.001*cl),
         # (le * config["num_warmup_epochs"], config["learning_rate"]),
         # (le * config["num_epochs"], 0.0),
     ]
     lr_scheduler = PiecewiseLinear(optimizer, param_name="lr", milestones_values=milestones_values)
 
-#    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config["lr_step_size"], gamma=config["lr_gamma"])
+    # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config["lr_step_size"], gamma=config["lr_gamma"])
 
     return model, optimizer, criterion, lr_scheduler
 
@@ -376,6 +380,8 @@ def create_supervised_trainer(model,
         #            ]  #if torch.cuda.device_count() >= 1 else targets
 
         outputs = model(imgs)
+        # print(outputs.shape)
+        # print(targets.shape)
         loss = criterion(outputs, targets)
 
         # dist_metrics = [reduce_metric_dict(me) for me in _metrics]
